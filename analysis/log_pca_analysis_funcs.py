@@ -25,6 +25,27 @@ def geodesic_quantiles_from_component(x, v_k, t_vals=None):
         Qs.append(Q)
     return t_vals, Qs
 
+def reconstruct_quantiles(Qbar, components, coords):
+    """
+    Qbar: (M,) array of frechet mean quantiles
+    components: (K, M) array of log-PCA components
+    coords: (N, K) array of log-PCA coordinates
+    returns: (N, M) array of reconstructed quantiles
+    """
+    Qbar = np.asarray(Qbar)
+    components = np.asarray(components)
+    coords = np.asarray(coords)
+
+    Q_recon = Qbar + np.matmul(coords, components)
+    N, K = coords.shape
+    M = Qbar.shape[0]
+
+    Q_recon = np.empty((N, M))
+    for i in range(N):
+        Q_recon[i] = Qbar + np.sum(coords[i, k] * components[k] for k in range(K))
+    
+    return Q_recon
+
 def draw_samples_from_quantiles(Q, alphas, n_samples=20000, eps=1e-3):
     """
     Q: (M,) array of quantiles
@@ -38,17 +59,19 @@ def draw_samples_from_quantiles(Q, alphas, n_samples=20000, eps=1e-3):
     u = np.random.uniform(eps, 1 - eps, size=n_samples)
     # import pdb; pdb.set_trace()
     samples = np.interp(u, alphas, Q)
+
     return samples
 
-def pdf_from_quantiles_kde(Q, alphas, x_grid=None, n_samples=20000, eps=1e-3):
+def pdf_from_quantiles_kde(Q, alphas, x_grid=None, samples = 20000, eps=1e-3):
 
     """
     Q: (M,) array of quantiles
     alphas: (M,) array of quantile levels in (0,1)
     returns: (L,) array of densities on x_grid
     """
-    
-    samples = draw_samples_from_quantiles(Q, alphas, n_samples=n_samples, eps=eps)
+
+    if isinstance(samples, int):
+        samples = draw_samples_from_quantiles(Q, alphas, n_samples=samples, eps=eps)
 
     if x_grid is None:
         lo, hi = np.quantile(samples, [0.001, 0.999])
@@ -57,14 +80,17 @@ def pdf_from_quantiles_kde(Q, alphas, x_grid=None, n_samples=20000, eps=1e-3):
     kde = gaussian_kde(samples)
     return x_grid, kde(x_grid)
 
-def pdf_from_quantiles_arr(Q_arr, alphas, x_grid=None, n_samples=20000, eps=1e-3, filedir = None):
+def pdf_from_quantiles_arr(Q_arr, alphas, x_grid=None, samples=20000, eps=1e-3, filedir = None):
     """
     Q_arr: (N, M) array of quantiles
     returns: (N, L) array of densities on x_grid
     """
 
     if filedir is None or not os.path.exists(filedir):
-        densities = np.array([pdf_from_quantiles_kde(Q, alphas, x_grid=x_grid, n_samples=n_samples, eps=eps)[1] for Q in Q_arr])
+        if isinstance(samples, int):
+            densities = np.array([pdf_from_quantiles_kde(Q, alphas, x_grid=x_grid, samples=samples, eps=eps)[1] for Q in Q_arr])
+        else:
+            densities = np.array([pdf_from_quantiles_kde(Q, alphas, x_grid=x_grid, samples=samples[i], eps=eps)[1] for i, Q in enumerate(Q_arr)])
         if filedir is not None:
             np.save(filedir, densities)
         return x_grid, densities
@@ -144,30 +170,21 @@ def get_empirical_estimates(pdf, data, x, thresh = 1.0):
 
     return peak_locs, proportions
 
-def get_empirical_peaks_all(x, individuals, RTs_dict, times_dict, trough_loc, T_bounds):
+def get_empirical_peaks_all(x, pdfs, samples):
 
-    primary_peak_locs = np.empty((len(individuals), T_bounds.shape[0]))*np.nan
-    secondary_peak_locs = np.empty((len(individuals), T_bounds.shape[0]))*np.nan
-    primary_peak_proportions = np.empty((len(individuals), T_bounds.shape[0]))*np.nan
-    secondary_peak_proportions = np.empty((len(individuals), T_bounds.shape[0]))*np.nan
+    primary_peak_locs = np.empty(len(pdfs))*np.nan
+    secondary_peak_locs = np.empty(len(pdfs))*np.nan
+    primary_peak_proportions = np.empty(len(pdfs))*np.nan
+    secondary_peak_proportions = np.empty(len(pdfs))*np.nan
 
-    for i, ind in enumerate(individuals):
+    for i, (pdf, rRTs) in enumerate(zip(pdfs, samples)):
+       
+        pdf = gaussian_kde(rRTs).evaluate(x)
+        peak_locs, proportions = get_empirical_estimates(pdf, rRTs, x, thresh = 1.0)
 
-        individual_times = (times_dict[ind]['time_arr'] - times_dict[ind]['DLMO'])[1:] # times relative to DLMO; remove wake-up time
-        DLMO_session_mask = np.array([(bounds[0] < individual_times)*(bounds[1] >= individual_times) for bounds in T_bounds])
-
-        for DLMO_t_ind, session_mask_t in enumerate(DLMO_session_mask):
-            session_inds = np.nonzero(session_mask_t)[0]
-            if len(session_inds) == 0:
-                continue
-            rRTs = np.concatenate([1/RTs_dict[ind][t]*1000 for t in session_inds])
-
-            pdf = gaussian_kde(rRTs).evaluate(x)
-            peak_locs, proportions = get_empirical_estimates(pdf, rRTs, x, thresh = 1.0)
-
-            primary_peak_locs[i, DLMO_t_ind] = peak_locs[1]
-            secondary_peak_locs[i, DLMO_t_ind] = peak_locs[0]
-            primary_peak_proportions[i, DLMO_t_ind] = proportions[1]
-            secondary_peak_proportions[i, DLMO_t_ind] = proportions[0]
+        primary_peak_locs[i] = peak_locs[1]
+        secondary_peak_locs[i] = peak_locs[0]
+        primary_peak_proportions[i] = proportions[1]
+        secondary_peak_proportions[i] = proportions[0]
 
     return primary_peak_locs, secondary_peak_locs, primary_peak_proportions, secondary_peak_proportions
