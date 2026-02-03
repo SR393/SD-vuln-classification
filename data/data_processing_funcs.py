@@ -262,6 +262,19 @@ def get_standard_data_CR(lower_cutoff = 167, upper_cutoff = 10000, scale_factor 
 
     return pooled_data, T_arr    
 
+def get_standard_individual_rRT_data():
+
+    session_ind_arr_1 = np.arange(8)
+    session_ind_arr_2 = np.arange(8, 20)
+    RTs_dict = load_RT_data_dict(raw = False, subs = None)
+    RTs_dict = filter_data(RTs_dict, lower_cutoff = 167, upper_cutoff = 10000, 
+                                remove_circ_misaligned = True)
+    ind_keys = list(RTs_dict.keys())
+    rRTs_dict_1 = get_individual_data(RTs_dict, session_ind_arr_1, scale_factor = 1000)
+    rRTs_dict_2 = get_individual_data(RTs_dict, session_ind_arr_2, scale_factor = 1000)
+
+    return [rRTs_dict_1[ind] for ind in ind_keys], [rRTs_dict_2[ind] for ind in ind_keys]
+
 def get_WSU_data(lower_cutoff = 167, upper_cutoff = 10000, scale_factor = 1000, include_SD = True, include_controls = False):
 
     module_dir = os.path.dirname(os.path.abspath(inspect.getsourcefile(get_WSU_data)))
