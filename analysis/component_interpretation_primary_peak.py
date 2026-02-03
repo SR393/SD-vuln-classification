@@ -67,55 +67,58 @@ def get_all_correlations(repeat, n_samples, alphas, eps, x_grid, comp_1_projecti
 
     return comp_1_BL_correlation, comp_1_SD_correlation, comp_2_BL_correlation, comp_2_SD_correlation
 
-x_grid = np.linspace(-1.0, 6.5, 2500)
+if __name__ == "__main__":
 
-rRTs_1, rRTs_2 = dp.get_standard_individual_rRT_data()
-emp_kdes_BL = np.array([gaussian_kde(rRTs)(x_grid) for rRTs in rRTs_1])
-emp_kdes_SD = np.array([gaussian_kde(rRTs)(x_grid) for rRTs in rRTs_2])
+    x_grid = np.linspace(-1.0, 6.5, 2500)
 
-emp_peak_locs_BL = get_empirical_peaks_all(x_grid, emp_kdes_BL, rRTs_1)[0]
-emp_peak_locs_SD = get_empirical_peaks_all(x_grid, emp_kdes_SD, rRTs_2)[0]
+    rRTs_1, rRTs_2 = dp.get_standard_individual_rRT_data()
+    emp_kdes_BL = np.array([gaussian_kde(rRTs)(x_grid) for rRTs in rRTs_1])
+    emp_kdes_SD = np.array([gaussian_kde(rRTs)(x_grid) for rRTs in rRTs_2])
 
-max_K = 8
+    emp_peak_locs_BL = get_empirical_peaks_all(x_grid, emp_kdes_BL, rRTs_1)[0]
+    emp_peak_locs_SD = get_empirical_peaks_all(x_grid, emp_kdes_SD, rRTs_2)[0]
 
-eps = 1e-3
-M = 200
-alphas = np.linspace(eps, 1 - eps, M)
+    max_K = 8
 
-log_Qbar_BL = np.load(f'../data/logpca_frechet_mean_BL_{max_K}-dims.npy')
-components_BL = np.load(f'../data/logpca_components_BL_{max_K}-dims.npy')
-beta_BL = np.load(f'../data/logpca_coords_BL_{max_K}-dims.npy')
+    eps = 1e-3
+    M = 200
+    alphas = np.linspace(eps, 1 - eps, M)
 
-log_Qbar_SD = np.load(f'../data/logpca_frechet_mean_SD_{max_K}-dims.npy')
-components_SD = np.load(f'../data/logpca_components_SD_{max_K}-dims.npy')
-beta_SD = np.load(f'../data/logpca_coords_SD_{max_K}-dims.npy')
+    log_Qbar_BL = np.load(f'../data/logpca_frechet_mean_BL_{max_K}-dims.npy')
+    components_BL = np.load(f'../data/logpca_components_BL_{max_K}-dims.npy')
+    beta_BL = np.load(f'../data/logpca_coords_BL_{max_K}-dims.npy')
 
-comp_1_projection_quantiles_BL = geodesic_quantiles_from_component(log_Qbar_BL, components_BL[0], t_vals=beta_BL[:, 0])[1]
-comp_1_projection_quantiles_SD = geodesic_quantiles_from_component(log_Qbar_SD, components_SD[0], t_vals=beta_SD[:, 0])[1]
-comp_2_projection_quantiles_BL = geodesic_quantiles_from_component(log_Qbar_BL, components_BL[1], t_vals=beta_BL[:, 1])[1]
-comp_2_projection_quantiles_SD = geodesic_quantiles_from_component(log_Qbar_SD, components_SD[1], t_vals=beta_SD[:, 1])[1]
+    log_Qbar_SD = np.load(f'../data/logpca_frechet_mean_SD_{max_K}-dims.npy')
+    components_SD = np.load(f'../data/logpca_components_SD_{max_K}-dims.npy')
+    beta_SD = np.load(f'../data/logpca_coords_SD_{max_K}-dims.npy')
 
-# n_repeats = 100
-n_samples = 1000
-n_repeats = 1
+    comp_1_projection_quantiles_BL = geodesic_quantiles_from_component(log_Qbar_BL, components_BL[0], t_vals=beta_BL[:, 0])[1]
+    comp_1_projection_quantiles_SD = geodesic_quantiles_from_component(log_Qbar_SD, components_SD[0], t_vals=beta_SD[:, 0])[1]
+    comp_2_projection_quantiles_BL = geodesic_quantiles_from_component(log_Qbar_BL, components_BL[1], t_vals=beta_BL[:, 1])[1]
+    comp_2_projection_quantiles_SD = geodesic_quantiles_from_component(log_Qbar_SD, components_SD[1], t_vals=beta_SD[:, 1])[1]
 
-comp_1_BL_correlations = np.zeros(n_repeats)
-comp_1_SD_correlations = np.zeros(n_repeats)
-comp_2_BL_correlations = np.zeros(n_repeats)
-comp_2_SD_correlations = np.zeros(n_repeats)
+    n_samples = 1000
+    n_repeats = 100
 
-ncpus = 20
+    ncpus = 20
 
-corrs_func = partial(get_all_correlations, emp_peak_locs_BL = emp_peak_locs_BL, emp_peak_locs_SD = emp_peak_locs_SD, 
-                     x_grid = x_grid, alphas = alphas, eps = eps, n_samples = n_samples,
-                     comp_1_projection_quantiles_BL = comp_1_projection_quantiles_BL, comp_1_projection_quantiles_SD = comp_1_projection_quantiles_SD)
+    corrs_func = partial(get_all_correlations, emp_peak_locs_BL = emp_peak_locs_BL, emp_peak_locs_SD = emp_peak_locs_SD, 
+                        x_grid = x_grid, alphas = alphas, eps = eps, n_samples = n_samples,
+                        comp_1_projection_quantiles_BL = comp_1_projection_quantiles_BL, comp_1_projection_quantiles_SD = comp_1_projection_quantiles_SD,
+                        comp_2_projection_quantiles_BL = comp_2_projection_quantiles_BL, comp_2_projection_quantiles_SD = comp_2_projection_quantiles_SD)
 
-with mproc.Pool(processes = ncpus) as pool:
-    output = pool.starmap(corrs_func, np.arange(n_repeats))
+    with mproc.Pool(processes = ncpus) as pool:
+        output = pool.map(corrs_func, np.arange(n_repeats))
 
-print(f"Comp 1 BL locs corr: {np.mean(comp_1_BL_correlations):.3f} +- {np.std(comp_1_BL_correlations):.3f}")
-print(f"Comp 1 SD locs corr: {np.mean(comp_1_SD_correlations):.3f} +- {np.std(comp_1_SD_correlations):.3f}")
-print(f"Comp 2 BL locs corr: {np.mean(comp_2_BL_correlations):.3f} +- {np.std(comp_2_BL_correlations):.3f}")
-print(f"Comp 2 SD locs corr: {np.mean(comp_2_SD_correlations):.3f} +- {np.std(comp_2_SD_correlations):.3f}")
+    output = np.array(output)
+    comp_1_BL_correlations = output[:, 0]
+    comp_1_SD_correlations = output[:, 1]
+    comp_2_BL_correlations = output[:, 2]
+    comp_2_SD_correlations = output[:, 3]
 
-import pdb; pdb.set_trace()
+    print(f"Comp 1 BL locs corr: {np.mean(comp_1_BL_correlations):.3f} +- {np.std(comp_1_BL_correlations):.3f}")
+    print(f"Comp 1 SD locs corr: {np.mean(comp_1_SD_correlations):.3f} +- {np.std(comp_1_SD_correlations):.3f}")
+    print(f"Comp 2 BL locs corr: {np.mean(comp_2_BL_correlations):.3f} +- {np.std(comp_2_BL_correlations):.3f}")
+    print(f"Comp 2 SD locs corr: {np.mean(comp_2_SD_correlations):.3f} +- {np.std(comp_2_SD_correlations):.3f}")
+
+    import pdb; pdb.set_trace()
