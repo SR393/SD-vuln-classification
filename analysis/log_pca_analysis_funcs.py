@@ -62,6 +62,26 @@ def draw_samples_from_quantiles(Q, alphas, n_samples=20000, eps=1e-3):
 
     return samples
 
+def draw_samples_from_quantiles_arr(Q_arr, alphas, n_samples=20000, eps=1e-3, filedir = None):
+    """
+    Q_arr: (N, M) array of quantiles
+    alphas: (M,) array of quantile levels in (0,1)
+    returns: (N, n_samples) array of samples drawn from the distributions defined by each row of Q_arr
+    """
+    Q_arr = np.asarray(Q_arr)
+    alphas = np.asarray(alphas)
+
+    N, M = Q_arr.shape
+    samples_arr = np.empty((N, n_samples))
+    if filedir is None or not os.path.exists(filedir):
+        samples_arr = np.array([draw_samples_from_quantiles(Q_arr[i], alphas, n_samples=n_samples, eps=eps) for i in range(N)])
+        if filedir is not None:
+            np.save(filedir, samples_arr)
+    else:
+        samples_arr = np.load(filedir)
+    
+    return samples_arr
+
 def pdf_from_quantiles_kde(Q, alphas, x_grid=None, samples = 20000, eps=1e-3):
 
     """
@@ -93,11 +113,10 @@ def pdf_from_quantiles_arr(Q_arr, alphas, x_grid=None, samples=20000, eps=1e-3, 
             densities = np.array([pdf_from_quantiles_kde(Q, alphas, x_grid=x_grid, samples=samples[i], eps=eps)[1] for i, Q in enumerate(Q_arr)])
         if filedir is not None:
             np.save(filedir, densities)
-        return x_grid, densities
     else:
         densities = np.load(filedir)
-        return x_grid, densities
 
+    return x_grid, densities
 def compute_quantiles_from_samples(samples_list, M=200, eps=1e-3, method="linear"):
     """
     samples_list: list of 1D arrays, length N
@@ -131,7 +150,8 @@ def estimate_empirical_peaks(pdf, data, x):
     return peak_locs, proportions
 
 def extract_prim_and_sec_peak(peak_locs, proportions, thresh = None):
-
+    if peak_locs.size == 1 and proportions.size > 1:
+        import pdb; pdb.set_trace()
     # initial guesses; primary peak contains the most observations, secondary peak is the lowest peak
     primary_peak = peak_locs[np.argmax(proportions)]
     secondary_peak = np.min(peak_locs)
