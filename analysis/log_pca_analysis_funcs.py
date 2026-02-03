@@ -128,30 +128,52 @@ def compute_quantiles_from_samples(samples_list, M=200, eps=1e-3, method="linear
     Q = np.vstack([np.quantile(s, alphas, method=method) for s in samples_list])
     return alphas, Q
 
+# def estimate_empirical_peaks(pdf, data, x):
+
+#     zeros, zero_inds = dp.get_derivative_zeros(x, pdf, return_inds = True)
+#     pdf_vals = pdf[zero_inds]
+
+#     if len(zeros) == 1:
+#         return zeros, np.array([1.0])
+#     elif len(zeros) % 2 == 0:
+#         raise ValueError('Number of pdf turning points should be odd.')
+#     elif pdf_vals[0] > pdf_vals[1]:
+#         peak_locs = zeros[::2]
+#         bounds = np.concatenate((np.array([np.min(x)]), zeros[1::2], np.array([np.max(x)])))
+#     else:
+#         peak_locs = zeros[1::2]
+#         bounds = np.concatenate((np.array([np.min(x)]), zeros[::2], np.array([np.max(x)])))
+    
+#     bounds = np.array([bounds[:-1], bounds[1:]]).T
+#     proportions = np.array([np.sum((data > lb)*(data <= ub)) for lb, ub in bounds])/len(data)
+
+#     return peak_locs, proportions
+
 def estimate_empirical_peaks(pdf, data, x):
 
-    zeros, zero_inds = dp.get_derivative_zeros(x, pdf, return_inds = True)
-    pdf_vals = pdf[zero_inds]
+    bounds = []
+    peaks = []
 
-    if len(zeros) == 1:
-        return zeros, np.array([1.0])
-    elif len(zeros) % 2 == 0:
-        raise ValueError('Number of pdf turning points should be odd.')
-    elif pdf_vals[0] > pdf_vals[1]:
-        peak_locs = zeros[::2]
-        bounds = np.concatenate((np.array([np.min(x)]), zeros[1::2], np.array([np.max(x)])))
-    else:
-        peak_locs = zeros[1::2]
-        bounds = np.concatenate((np.array([np.min(x)]), zeros[::2], np.array([np.max(x)])))
+    # only include edges as bounds if they are not local maxima; otherwise, exclude from consideration
+    if pdf[0] < pdf[1]:
+        bounds.append(np.array([x[0]]))
+    if pdf[-1] < pdf[-2]:
+        bounds.append(np.array([x[-1]]))
     
+    forward_diff = np.diff(pdf[:-1])
+    backward_diff = -np.diff(pdf[1:])
+
+    bounds.append(x[np.nonzero((forward_diff < 0)*(backward_diff < 0))[0] + 1])  # inner bounds are local minima between peaks
+    peaks.append(x[np.nonzero((forward_diff > 0)*(backward_diff > 0))[0] + 1])
+    bounds = np.sort(np.concatenate(bounds))
+    peaks = np.sort(np.concatenate(peaks))
     bounds = np.array([bounds[:-1], bounds[1:]]).T
     proportions = np.array([np.sum((data > lb)*(data <= ub)) for lb, ub in bounds])/len(data)
 
-    return peak_locs, proportions
+    return peaks, proportions
 
 def extract_prim_and_sec_peak(peak_locs, proportions, thresh = None):
-    if peak_locs.size == 1 and proportions.size > 1:
-        import pdb; pdb.set_trace()
+
     # initial guesses; primary peak contains the most observations, secondary peak is the lowest peak
     primary_peak = peak_locs[np.argmax(proportions)]
     secondary_peak = np.min(peak_locs)
@@ -208,3 +230,4 @@ def get_empirical_peaks_all(x, pdfs, samples):
         secondary_peak_proportions[i] = proportions[0]
 
     return primary_peak_locs, secondary_peak_locs, primary_peak_proportions, secondary_peak_proportions
+
