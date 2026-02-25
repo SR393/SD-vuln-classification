@@ -206,21 +206,25 @@ if __name__ == "__main__":
     ### Mutual Information Approach ###
 
     n_lags = 10
-    n_permutations = 1000
+    n_permutations = 500
     
     # ind_MI_partial = partial(individual_MI_values, n_permutations = n_permutations, n_lags = n_lags)
 
     # with mproc.Pool(ncpus) as pool:
     #     results = pool.starmap(ind_MI_partial, zip(RTs_dict.values(), seeds))
 
-    true_MIs = []
-    null_MIs = []
+    true_MIs = [[] for _ in range(n_lags)]
+    null_MIs = [[] for _ in range(n_lags)]
 
     for i, sessions in enumerate(RTs_dict.values()):
         seed = rng.integers(2**32 - 1)
         true_MI_ind, null_MIs_ind = individual_MI_values(sessions, n_permutations, n_lags, seed)
-        true_MIs.append(true_MI_ind)
-        null_MIs.append(null_MIs_ind)
+        for j in range(n_lags):
+            true_MIs[j].append(true_MI_ind[j])
+            null_MIs[j].append(null_MIs_ind[j])
+        print(f'individual {i} complete')
+
+    
 
     import pdb; pdb.set_trace()
 
