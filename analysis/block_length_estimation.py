@@ -1,21 +1,13 @@
 import sys
 sys.path.extend(['../data'])
-import multiprocessing as mproc
-from functools import partial
-
-import numpy as np
-from sklearn.feature_selection import mutual_info_regression
-import matplotlib.pyplot as plt
-
-import data_processing_funcs as dp
+import os
+from tqdm import tqdm
 
 import numpy as np
 from numba import njit, prange
 
+import data_processing_funcs as dp
 
-# ---------------------------
-# Digamma approximation (Numba-friendly)
-# ---------------------------
 @njit(cache=True)
 def _digamma(x: float) -> float:
     """
@@ -24,12 +16,12 @@ def _digamma(x: float) -> float:
     Uses recurrence to shift to x >= 8 and then asymptotic expansion.
     Accuracy is more than adequate for KSG with small k and n ~ 50-2000.
     """
-    # Handle tiny x (shouldn't happen in our use: we call digamma(n+1) etc.)
+    # Handle small x
     if x <= 0.0:
         return np.nan
 
     result = 0.0
-    # Shift upward
+    # Shift via recurrence to use asymptotic expansion for large x
     while x < 8.0:
         result -= 1.0 / x
         x += 1.0
@@ -46,39 +38,18 @@ def _digamma(x: float) -> float:
 
     return result
 
-
-# ---------------------------
-# Core: KSG MI estimator for 1D-1D variables
-# ---------------------------
 @njit(parallel=True, cache=True)
 def ksg_mi_1d_1d(x: np.ndarray, y: np.ndarray, k: int = 5) -> float:
     """
-    Kraskov–Stögbauer–Grassberger mutual information estimator (KSG-1)
+    k-nearest neighbors mutual information estimator (ref)
     for two 1D continuous variables.
-
-    Parameters
-    ----------
-    x, y : 1D arrays of same length n
-    k    : number of neighbors (typical 3..10)
-
-    Returns
-    -------
-    mi : float
-        Estimated MI in nats (natural log).
-        Can be slightly negative in finite samples; treat tiny negatives as ~0.
     """
+
     n = x.shape[0]
-    if y.shape[0] != n:
-        raise ValueError("x and y must have same length")
-    if k < 1 or k >= n:
-        raise ValueError("k must satisfy 1 <= k < n")
 
     # Arrays of neighbor counts for each i
     nx = np.empty(n, dtype=np.int64)
     ny = np.empty(n, dtype=np.int64)
-
-    # A tiny offset to avoid counting points at exactly eps due to ties
-    tiny = 1e-15
 
     for i in prange(n):
         xi = x[i]
@@ -114,11 +85,11 @@ def ksg_mi_1d_1d(x: np.ndarray, y: np.ndarray, k: int = 5) -> float:
         for t in range(1, k):
             if topk[t] > eps:
                 eps = topk[t]
-        eps -= tiny
+
         if eps < 0.0:
             eps = 0.0
 
-        # Count neighbors in marginal spaces within eps
+        # Count neighbors within eps
         cx = 0
         cy = 0
         for j in range(n):
@@ -133,7 +104,7 @@ def ksg_mi_1d_1d(x: np.ndarray, y: np.ndarray, k: int = 5) -> float:
         ny[i] = cy
 
     # MI = psi(k) + psi(n) - mean(psi(nx+1) + psi(ny+1))
-    # Some references include a -1/k term for certain variants; the common KSG-1 form is below.
+
     psi_k = _digamma(float(k))
     psi_n = _digamma(float(n))
 
@@ -146,13 +117,10 @@ def ksg_mi_1d_1d(x: np.ndarray, y: np.ndarray, k: int = 5) -> float:
     return mi
 
 
-# ---------------------------
-# Convenience: jitter to break ties (recommended for quantized RTs)
-# ---------------------------
 def ksg_mi_with_jitter(x: np.ndarray, y: np.ndarray, k: int = 5, jitter: float = 0.0, seed: int = 0) -> float:
     """
-    Wrapper that optionally adds tiny Gaussian jitter (in Python) to break ties.
-    Use jitter ~ 1e-10 * std(x) typically.
+    Wrapper that adds small Gaussian perturbations to break ties.
+    Jitter ~ 1e-10 * std(x).
     """
     x = np.asarray(x, dtype=np.float64)
     y = np.asarray(y, dtype=np.float64)
@@ -166,28 +134,21 @@ def ksg_mi_with_jitter(x: np.ndarray, y: np.ndarray, k: int = 5, jitter: float =
 
 def individual_MI_values(sessions, n_permutations, n_lags, seed):
 
-    true_MIs = np.zeros((n_lags, len(sessions)))
-    null_MIs = np.zeros((n_lags, len(sessions), n_permutations))
+    true_MIs = np.zeros((n_lags, len(sessions)))*np.nan
+    null_MIs = np.zeros((n_lags, len(sessions), n_permutations))*np.nan
     rng = np.random.default_rng(seed)
     for s_ind, session in enumerate(sessions):
-        permutations = [rng.permutation(session) for _ in range(n_permutations)]
         if len(session) == 0:
             continue
-        session_perm = rng.permutation(session)
         for i in range(1, n_lags + 1):
-            prec_rRTS = 1000 / session[:-i]
-            succ_rRTS = 1000 / session[i:]
-            # MI = mutual_info_regression(prec_rRTS.reshape(-1, 1), succ_rRTS, random_state = seed)[0]
-            MI = ksg_mi_with_jitter(prec_rRTS, succ_rRTS, k = 5, jitter = 1e-10, seed = seed)
+            prec_rRTs = 1000 / session[:-i]
+            succ_rRTs = 1000 / session[i:]
+            MI = ksg_mi_with_jitter(prec_rRTs, succ_rRTs, k = 4, jitter = 1e-10, seed = seed)
             true_MIs[i-1, s_ind] = MI
             for p in range(n_permutations):
-                session_perm = permutations[p]
-                prec_rRTs_perm = 1000 / session_perm[:-i]
-                succ_rRTs_perm = 1000 / session_perm[i:]
-                # MI_perm = mutual_info_regression(prec_rRTs_perm.reshape(-1, 1), succ_rRTs_perm, random_state = seed)[0]
-                MI_perm = ksg_mi_with_jitter(prec_rRTs_perm, succ_rRTs_perm, k = 5, jitter = 1e-10, seed = seed)
+                succ_rRTs_perm = rng.permutation(succ_rRTs)
+                MI_perm = ksg_mi_with_jitter(prec_rRTs, succ_rRTs_perm, k = 4, jitter = 1e-10, seed = seed)
                 null_MIs[i-1, s_ind, p] = MI_perm
-
     return true_MIs, null_MIs
 
 def estimate_p_value(true_MI, null_MIs):
@@ -196,41 +157,36 @@ def estimate_p_value(true_MI, null_MIs):
 
 if __name__ == "__main__":
 
-    ncpus = 20
-
     RTs_dict = dp.load_RT_data_dict()
     RTs_dict = dp.filter_data(RTs_dict, lower_cutoff = 167, upper_cutoff = 10000, genotype = None, remove_adaptation_effect = True, remove_circ_misaligned = True)
 
     rng = np.random.default_rng(seed=12345)
     seeds = rng.integers(2**32 - 1, size = len(RTs_dict))  # Generate a seed for the block length estimation process
-    ### Mutual Information Approach ###
 
     n_lags = 10
-    n_permutations = 500
+    n_permutations = 1000
     
-    # ind_MI_partial = partial(individual_MI_values, n_permutations = n_permutations, n_lags = n_lags)
+    if not os.path.exists('../data/block_length_estimation_true_MIs.npy'):
+        true_MIs = np.zeros((n_lags, len(RTs_dict), 20))*np.nan
+        null_MIs = np.zeros((n_lags, len(RTs_dict), 20, n_permutations))*np.nan
+        p_values = np.zeros((n_lags, len(RTs_dict), 20))*np.nan
+        for i, sessions in tqdm(enumerate(RTs_dict.values()), total=len(RTs_dict)):
+            seed = rng.integers(2**32 - 1)
+            true_MI_ind, null_MIs_ind = individual_MI_values(sessions, n_permutations, n_lags, seed)
+            p_values_ind = np.array([[estimate_p_value(true_MI, null_MIs) for true_MI, null_MIs in zip(true_MI_ind[j], null_MIs_ind[j])] for j in range(n_lags)])
+            p_values[:, i, :] = p_values_ind
+            for j in range(n_lags):
+                true_MIs[j, i, :] = true_MI_ind[j]
+                null_MIs[j, i, :, :] = null_MIs_ind[j]
+            # if i == 5:
+            #     import pdb; pdb.set_trace()
+            # print(f'individual {i} complete')
+        np.save('../data/block_length_estimation_true_MIs.npy', true_MIs)
+        np.save('../data/block_length_estimation_null_MIs.npy', null_MIs)
+        np.save('../data/block_length_estimation_p_values.npy', p_values)
+    else:
+        true_MIs = np.load('../data/block_length_estimation_true_MIs.npy')
+        null_MIs = np.load('../data/block_length_estimation_null_MIs.npy')
+        p_values = np.load('../data/block_length_estimation_p_values.npy')
 
-    # with mproc.Pool(ncpus) as pool:
-    #     results = pool.starmap(ind_MI_partial, zip(RTs_dict.values(), seeds))
-
-    true_MIs = [[] for _ in range(n_lags)]
-    null_MIs = [[] for _ in range(n_lags)]
-
-    for i, sessions in enumerate(RTs_dict.values()):
-        seed = rng.integers(2**32 - 1)
-        true_MI_ind, null_MIs_ind = individual_MI_values(sessions, n_permutations, n_lags, seed)
-        for j in range(n_lags):
-            true_MIs[j].append(true_MI_ind[j])
-            null_MIs[j].append(null_MIs_ind[j])
-        print(f'individual {i} complete')
-
-    
-
-    import pdb; pdb.set_trace()
-
-    for i in range(n_lags):
-        true_MIs = np.array([r[0][i] for r in results])
-        null_MIs = np.array([r[1][i] for r in results])
-        p_values = np.array([estimate_p_value(true_MI, null_MIs) for true_MI, null_MIs in zip(true_MIs, null_MIs)])
-
-    import pdb; pdb.set_trace()
+    print(np.mean(np.mean(p_values, axis = 1), axis = 1))
