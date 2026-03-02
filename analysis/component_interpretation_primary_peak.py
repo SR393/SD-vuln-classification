@@ -11,57 +11,86 @@ import data_processing_funcs as dp
 from log_pca_analysis_funcs import (draw_samples_from_quantiles_arr, geodesic_quantiles_from_component, get_empirical_peaks_all, 
                                     pdf_from_quantiles_arr)
 
-def get_all_correlations(repeat, n_samples, alphas, eps, x_grid, comp_1_projection_quantiles_BL, comp_1_projection_quantiles_SD, comp_2_projection_quantiles_BL, comp_2_projection_quantiles_SD, emp_peak_locs_BL, emp_peak_locs_SD):
+def get_all_correlations(repeat, n_samples, alphas, eps, x_grid, emp_peak_locs_BL, emp_peak_locs_SD):
 
-        ## Comp 1 BL ##
-    if not os.path.exists(f'../data/peaks/logpca_comp1_pp_loc_BL_n-{n_samples}_{repeat}.npy'):
-        comp_1_projection_samples_BL = draw_samples_from_quantiles_arr(comp_1_projection_quantiles_BL, alphas, n_samples=n_samples, eps=eps, 
-                                                                       filedir = f'../data/samples/logpca_comp1_geodesic_projection_samples_BL_negative_xgrid_n-{n_samples}_{repeat}.npy') 
-        comp_1_projection_densities_BL = pdf_from_quantiles_arr(comp_1_projection_quantiles_BL, alphas, x_grid=x_grid, samples = comp_1_projection_samples_BL, 
-                                                                         filedir = f'../data/densities/logpca_comp1_geodesic_projection_densities_BL_negative_xgrid_n-{n_samples}_{repeat}.npy')[1]
-        primary_peak_locs_comp_1_BL = get_empirical_peaks_all(x_grid, comp_1_projection_densities_BL, comp_1_projection_samples_BL)[0]
-        np.save(f'../data/peaks/logpca_comp1_pp_loc_BL_n-{n_samples}_{repeat}.npy', primary_peak_locs_comp_1_BL)
-    else:
-        primary_peak_locs_comp_1_BL = np.load(f'../data/peaks/logpca_comp1_pp_loc_BL_n-{n_samples}_{repeat}.npy')
+    max_K = 8
+
+    log_Qbar_BL = np.load(f'../data/bootstrap_samples/q_means/logpca_frechet_mean_BL_{max_K}-dims_{repeat}.npy')
+    components_BL = np.load(f'../data/bootstrap_samples/components/logpca_components_BL_{max_K}-dims_{repeat}.npy')
+    beta_BL = np.load(f'../data/bootstrap_samples/coordinates/logpca_coords_BL_{max_K}-dims_{repeat}.npy')
+
+    log_Qbar_SD = np.load(f'../data/bootstrap_samples/q_means/logpca_frechet_mean_SD_{max_K}-dims_{repeat}.npy')
+    components_SD = np.load(f'../data/bootstrap_samples/components/logpca_components_SD_{max_K}-dims_{repeat}.npy')
+    beta_SD = np.load(f'../data/bootstrap_samples/coordinates/logpca_coords_SD_{max_K}-dims_{repeat}.npy')
+
+    comp_1_projection_quantiles_BL = geodesic_quantiles_from_component(log_Qbar_BL, components_BL[0], t_vals=beta_BL[:, 0])[1]
+    comp_1_projection_quantiles_SD = geodesic_quantiles_from_component(log_Qbar_SD, components_SD[0], t_vals=beta_SD[:, 0])[1]
+    comp_2_projection_quantiles_BL = geodesic_quantiles_from_component(log_Qbar_BL, components_BL[1], t_vals=beta_BL[:, 1])[1]
+    comp_2_projection_quantiles_SD = geodesic_quantiles_from_component(log_Qbar_SD, components_SD[1], t_vals=beta_SD[:, 1])[1]
+
+    ## Comp 1 BL ##
+
+    comp_1_projection_samples_BL = draw_samples_from_quantiles_arr(comp_1_projection_quantiles_BL, alphas, n_samples=n_samples, eps=eps)                                                  
+    comp_1_projection_densities_BL = pdf_from_quantiles_arr(comp_1_projection_quantiles_BL, alphas, x_grid=x_grid, samples = comp_1_projection_samples_BL)[1]
+    primary_peak_locs_comp_1_BL = get_empirical_peaks_all(x_grid, comp_1_projection_densities_BL, comp_1_projection_samples_BL)[0]
+    # if not os.path.exists(f'../data/peaks/logpca_comp1_pp_loc_BL_n-{n_samples}_{repeat}.npy'):
+    #     comp_1_projection_samples_BL = draw_samples_from_quantiles_arr(comp_1_projection_quantiles_BL, alphas, n_samples=n_samples, eps=eps, 
+    #                                                                    filedir = f'../data/samples/logpca_comp1_geodesic_projection_samples_BL_negative_xgrid_n-{n_samples}_{repeat}.npy') 
+    #     comp_1_projection_densities_BL = pdf_from_quantiles_arr(comp_1_projection_quantiles_BL, alphas, x_grid=x_grid, samples = comp_1_projection_samples_BL, 
+    #                                                                      filedir = f'../data/densities/logpca_comp1_geodesic_projection_densities_BL_negative_xgrid_n-{n_samples}_{repeat}.npy')[1]
+    #     primary_peak_locs_comp_1_BL = get_empirical_peaks_all(x_grid, comp_1_projection_densities_BL, comp_1_projection_samples_BL)[0]
+    #     np.save(f'../data/peaks/logpca_comp1_pp_loc_BL_n-{n_samples}_{repeat}.npy', primary_peak_locs_comp_1_BL)
+    # else:
+    #     primary_peak_locs_comp_1_BL = np.load(f'../data/peaks/logpca_comp1_pp_loc_BL_n-{n_samples}_{repeat}.npy')
     
     comp_1_BL_correlation = np.corrcoef(primary_peak_locs_comp_1_BL, emp_peak_locs_BL)[0, 1]
 
     ## Comp 1 SD ##
-    if not os.path.exists(f'../data/peaks/logpca_comp1_pp_loc_SD_n-{n_samples}_{repeat}.npy'):
-        comp_1_projection_samples_SD = draw_samples_from_quantiles_arr(comp_1_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps, 
-                                                                       filedir = f'../data/samples/logpca_comp1_geodesic_projection_samples_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')
-        comp_1_projection_densities_SD = pdf_from_quantiles_arr(comp_1_projection_quantiles_SD, alphas, x_grid=x_grid, samples = comp_1_projection_samples_SD,
-                                                                filedir = f'../data/densities/logpca_comp1_geodesic_projection_densities_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')[1]
-        primary_peak_locs_comp_1_SD = get_empirical_peaks_all(x_grid, comp_1_projection_densities_SD, comp_1_projection_samples_SD)[0]
-        np.save(f'../data/peaks/logpca_comp1_pp_loc_SD_n-{n_samples}_{repeat}.npy', primary_peak_locs_comp_1_SD)
-    else:
-        primary_peak_locs_comp_1_SD = np.load(f'../data/peaks/logpca_comp1_pp_loc_SD_n-{n_samples}_{repeat}.npy')
+    comp_1_projection_samples_SD = draw_samples_from_quantiles_arr(comp_1_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps)                                                          
+    comp_1_projection_densities_SD = pdf_from_quantiles_arr(comp_1_projection_quantiles_SD, alphas, x_grid=x_grid, samples = comp_1_projection_samples_SD)[1]
+    primary_peak_locs_comp_1_SD = get_empirical_peaks_all(x_grid, comp_1_projection_densities_SD, comp_1_projection_samples_SD)[0]
+    # if not os.path.exists(f'../data/peaks/logpca_comp1_pp_loc_SD_n-{n_samples}_{repeat}.npy'):
+    #     comp_1_projection_samples_SD = draw_samples_from_quantiles_arr(comp_1_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps, 
+    #                                                                    filedir = f'../data/samples/logpca_comp1_geodesic_projection_samples_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')
+    #     comp_1_projection_densities_SD = pdf_from_quantiles_arr(comp_1_projection_quantiles_SD, alphas, x_grid=x_grid, samples = comp_1_projection_samples_SD,
+    #                                                             filedir = f'../data/densities/logpca_comp1_geodesic_projection_densities_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')[1]
+    #     primary_peak_locs_comp_1_SD = get_empirical_peaks_all(x_grid, comp_1_projection_densities_SD, comp_1_projection_samples_SD)[0]
+    #     np.save(f'../data/peaks/logpca_comp1_pp_loc_SD_n-{n_samples}_{repeat}.npy', primary_peak_locs_comp_1_SD)
+    # else:
+    #     primary_peak_locs_comp_1_SD = np.load(f'../data/peaks/logpca_comp1_pp_loc_SD_n-{n_samples}_{repeat}.npy')
 
     comp_1_SD_correlation = np.corrcoef(primary_peak_locs_comp_1_SD, emp_peak_locs_SD)[0, 1]
 
     ## Comp 2 BL ##
-    if not os.path.exists(f'../data/peaks/logpca_comp2_pp_loc_BL_n-{n_samples}_{repeat}.npy'):
-        comp_2_projection_samples_BL = draw_samples_from_quantiles_arr(comp_2_projection_quantiles_BL, alphas, n_samples=n_samples, eps=eps, 
-                                                                       filedir = f'../data/samples/logpca_comp2_geodesic_projection_samples_BL_negative_xgrid_n-{n_samples}_{repeat}.npy')
-        comp_2_projection_densities_BL = pdf_from_quantiles_arr(comp_2_projection_quantiles_BL, alphas, x_grid=x_grid, samples = comp_2_projection_samples_BL,
-                                                                filedir = f'../data/densities/logpca_comp2_geodesic_projection_densities_BL_negative_xgrid_n-{n_samples}_{repeat}.npy')[1]
-        primary_peak_locs_comp_2_BL = get_empirical_peaks_all(x_grid, comp_2_projection_densities_BL, comp_2_projection_samples_BL)[0]
-        np.save(f'../data/peaks/logpca_comp2_pp_loc_BL_n-{n_samples}_{repeat}.npy', primary_peak_locs_comp_2_BL)
-    else:
-        primary_peak_locs_comp_2_BL = np.load(f'../data/peaks/logpca_comp2_pp_loc_BL_n-{n_samples}_{repeat}.npy')
+    comp_2_projection_samples_BL = draw_samples_from_quantiles_arr(comp_2_projection_quantiles_BL, alphas, n_samples=n_samples, eps=eps)
+    comp_2_projection_densities_BL = pdf_from_quantiles_arr(comp_2_projection_quantiles_BL, alphas, x_grid=x_grid, samples = comp_2_projection_samples_BL)[1]
+    primary_peak_locs_comp_2_BL = get_empirical_peaks_all(x_grid, comp_2_projection_densities_BL, comp_2_projection_samples_BL)[0]
+
+    # if not os.path.exists(f'../data/peaks/logpca_comp2_pp_loc_BL_n-{n_samples}_{repeat}.npy'):
+    #     comp_2_projection_samples_BL = draw_samples_from_quantiles_arr(comp_2_projection_quantiles_BL, alphas, n_samples=n_samples, eps=eps, 
+    #                                                                    filedir = f'../data/samples/logpca_comp2_geodesic_projection_samples_BL_negative_xgrid_n-{n_samples}_{repeat}.npy')
+    #     comp_2_projection_densities_BL = pdf_from_quantiles_arr(comp_2_projection_quantiles_BL, alphas, x_grid=x_grid, samples = comp_2_projection_samples_BL,
+    #                                                             filedir = f'../data/densities/logpca_comp2_geodesic_projection_densities_BL_negative_xgrid_n-{n_samples}_{repeat}.npy')[1]
+    #     primary_peak_locs_comp_2_BL = get_empirical_peaks_all(x_grid, comp_2_projection_densities_BL, comp_2_projection_samples_BL)[0]
+    #     np.save(f'../data/peaks/logpca_comp2_pp_loc_BL_n-{n_samples}_{repeat}.npy', primary_peak_locs_comp_2_BL)
+    # else:
+    #     primary_peak_locs_comp_2_BL = np.load(f'../data/peaks/logpca_comp2_pp_loc_BL_n-{n_samples}_{repeat}.npy')
 
     comp_2_BL_correlation = np.corrcoef(primary_peak_locs_comp_2_BL, emp_peak_locs_BL)[0, 1]
 
     ## Comp 2 SD ##
-    if not os.path.exists(f'../data/peaks/logpca_comp2_pp_loc_SD_n-{n_samples}_{repeat}.npy'):
-        comp_2_projection_samples_SD = draw_samples_from_quantiles_arr(comp_2_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps, 
-                                                                       filedir = f'../data/samples/logpca_comp2_geodesic_projection_samples_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')
-        comp_2_projection_densities_SD = pdf_from_quantiles_arr(comp_2_projection_quantiles_SD, alphas, x_grid=x_grid, samples = comp_2_projection_samples_SD,
-                                                                filedir = f'../data/densities/logpca_comp2_geodesic_projection_densities_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')[1]
-        primary_peak_locs_comp_2_SD = get_empirical_peaks_all(x_grid, comp_2_projection_densities_SD, comp_2_projection_samples_SD)[0]
-        np.save(f'../data/peaks/logpca_comp2_pp_loc_SD_n-{n_samples}_{repeat}.npy', primary_peak_locs_comp_2_SD)
-    else:
-        primary_peak_locs_comp_2_SD = np.load(f'../data/peaks/logpca_comp2_pp_loc_SD_n-{n_samples}_{repeat}.npy')
+    comp_2_projection_samples_SD = draw_samples_from_quantiles_arr(comp_2_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps)
+    comp_2_projection_densities_SD = pdf_from_quantiles_arr(comp_2_projection_quantiles_SD, alphas, x_grid=x_grid, samples = comp_2_projection_samples_SD)[1]
+    primary_peak_locs_comp_2_SD = get_empirical_peaks_all(x_grid, comp_2_projection_densities_SD, comp_2_projection_samples_SD)[0]
+    # if not os.path.exists(f'../data/peaks/logpca_comp2_pp_loc_SD_n-{n_samples}_{repeat}.npy'):
+    #     comp_2_projection_samples_SD = draw_samples_from_quantiles_arr(comp_2_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps, 
+    #                                                                    filedir = f'../data/samples/logpca_comp2_geodesic_projection_samples_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')
+    #     comp_2_projection_densities_SD = pdf_from_quantiles_arr(comp_2_projection_quantiles_SD, alphas, x_grid=x_grid, samples = comp_2_projection_samples_SD,
+    #                                                             filedir = f'../data/densities/logpca_comp2_geodesic_projection_densities_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')[1]
+    #     primary_peak_locs_comp_2_SD = get_empirical_peaks_all(x_grid, comp_2_projection_densities_SD, comp_2_projection_samples_SD)[0]
+    #     np.save(f'../data/peaks/logpca_comp2_pp_loc_SD_n-{n_samples}_{repeat}.npy', primary_peak_locs_comp_2_SD)
+    # else:
+    #     primary_peak_locs_comp_2_SD = np.load(f'../data/peaks/logpca_comp2_pp_loc_SD_n-{n_samples}_{repeat}.npy')
 
     comp_2_SD_correlation = np.corrcoef(primary_peak_locs_comp_2_SD, emp_peak_locs_SD)[0, 1]
 
@@ -84,31 +113,17 @@ if __name__ == "__main__":
     M = 200
     alphas = np.linspace(eps, 1 - eps, M)
 
-    log_Qbar_BL = np.load(f'../data/logpca_frechet_mean_BL_{max_K}-dims.npy')
-    components_BL = np.load(f'../data/logpca_components_BL_{max_K}-dims.npy')
-    beta_BL = np.load(f'../data/logpca_coords_BL_{max_K}-dims.npy')
-
-    log_Qbar_SD = np.load(f'../data/logpca_frechet_mean_SD_{max_K}-dims.npy')
-    components_SD = np.load(f'../data/logpca_components_SD_{max_K}-dims.npy')
-    beta_SD = np.load(f'../data/logpca_coords_SD_{max_K}-dims.npy')
-
-    comp_1_projection_quantiles_BL = geodesic_quantiles_from_component(log_Qbar_BL, components_BL[0], t_vals=beta_BL[:, 0])[1]
-    comp_1_projection_quantiles_SD = geodesic_quantiles_from_component(log_Qbar_SD, components_SD[0], t_vals=beta_SD[:, 0])[1]
-    comp_2_projection_quantiles_BL = geodesic_quantiles_from_component(log_Qbar_BL, components_BL[1], t_vals=beta_BL[:, 1])[1]
-    comp_2_projection_quantiles_SD = geodesic_quantiles_from_component(log_Qbar_SD, components_SD[1], t_vals=beta_SD[:, 1])[1]
-
     n_samples = 1000
-    n_repeats = 100
+    n_repeats = 1000
 
     ncpus = 20
 
     corrs_func = partial(get_all_correlations, emp_peak_locs_BL = emp_peak_locs_BL, emp_peak_locs_SD = emp_peak_locs_SD, 
-                        x_grid = x_grid, alphas = alphas, eps = eps, n_samples = n_samples,
-                        comp_1_projection_quantiles_BL = comp_1_projection_quantiles_BL, comp_1_projection_quantiles_SD = comp_1_projection_quantiles_SD,
-                        comp_2_projection_quantiles_BL = comp_2_projection_quantiles_BL, comp_2_projection_quantiles_SD = comp_2_projection_quantiles_SD)
+                        x_grid = x_grid, alphas = alphas, eps = eps, n_samples = n_samples)
 
-    with mproc.Pool(processes = ncpus) as pool:
-        output = pool.map(corrs_func, np.arange(n_repeats))
+    output = []
+    for i in range(n_repeats):
+        output.append(corrs_func(i))
 
     output = np.array(output)
     comp_1_BL_correlations = output[:, 0]

@@ -5,30 +5,47 @@ sys.path.extend(['../data'])
 import os
 import multiprocessing as mproc
 from functools import partial
+from tqdm import tqdm
 
 import numpy as np
 from scipy.stats import gaussian_kde
+from KDEpy import FFTKDE
+import fastkde
 
 import data_processing_funcs as dp
 from log_pca_analysis_funcs import (geodesic_quantiles_from_component, pdf_from_quantiles_arr, draw_samples_from_quantiles_arr, 
                                     get_empirical_peaks_all, reconstruct_quantiles)
 
-def get_metrics(repeat, n_samples, alphas, eps, x_grid, x1_ind, comp_1_projection_quantiles_SD, comp_2_projection_quantiles_SD, both_components_projection_quantiles_SD, emp_secondary_peak_locs_SD, emp_left_tail_mass_SD):
+def get_metrics(index, n_samples, alphas, eps, x_grid, x1_ind, emp_secondary_peak_locs_SD, emp_left_tail_mass_SD):
+    
+    K = 8
 
-        ## Comp 1 SD ##
-    if not os.path.exists(f'../data/peaks/logpca_comp1_sp_loc_SD_n-{n_samples}_{repeat}.npy'):
-        comp_1_projection_samples_SD = draw_samples_from_quantiles_arr(comp_1_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps, 
-                                                                       filedir = f'../data/samples/logpca_comp1_geodesic_projection_samples_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')
-        comp_1_projection_densities_SD = pdf_from_quantiles_arr(comp_1_projection_quantiles_SD, alphas, x_grid=x_grid, samples = comp_1_projection_samples_SD,
-                                                                filedir = f'../data/densities/logpca_comp1_geodesic_projection_densities_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')[1]
-        secondary_peak_locs_comp_1_SD = get_empirical_peaks_all(x_grid, comp_1_projection_densities_SD, comp_1_projection_samples_SD)[1]
-        np.save(f'../data/peaks/logpca_comp1_sp_loc_SD_n-{n_samples}_{repeat}.npy', secondary_peak_locs_comp_1_SD)
-    else:
-        comp_1_projection_samples_SD = draw_samples_from_quantiles_arr(comp_1_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps, 
-                                                                       filedir = f'../data/samples/logpca_comp1_geodesic_projection_samples_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')
-        comp_1_projection_densities_SD = pdf_from_quantiles_arr(comp_1_projection_quantiles_SD, alphas, x_grid=x_grid, samples = comp_1_projection_samples_SD,
-                                                                filedir = f'../data/densities/logpca_comp1_geodesic_projection_densities_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')[1]
-        secondary_peak_locs_comp_1_SD = np.load(f'../data/peaks/logpca_comp1_sp_loc_SD_n-{n_samples}_{repeat}.npy')
+    log_Qbar_SD = np.load(f'../data/bootstrap_samples/q_means/logpca_frechet_mean_SD_{K}-dims_{index}.npy')
+    components_SD = np.load(f'../data/bootstrap_samples/components/logpca_components_SD_{K}-dims_{index}.npy')
+    beta_SD = np.load(f'../data/bootstrap_samples/coordinates/logpca_coords_SD_{K}-dims_{index}.npy')
+
+    comp_1_projection_quantiles_SD = np.array(geodesic_quantiles_from_component(log_Qbar_SD, components_SD[0], t_vals=beta_SD[:, 0])[1])
+    comp_2_projection_quantiles_SD = np.array(geodesic_quantiles_from_component(log_Qbar_SD, components_SD[1], t_vals=beta_SD[:, 1])[1])
+    both_components_projection_quantiles_SD = reconstruct_quantiles(log_Qbar_SD, components_SD[:2], beta_SD[:, :2])
+
+    ## Comp 1 SD ##
+    comp_1_projection_samples_SD = draw_samples_from_quantiles_arr(comp_1_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps)
+                                                                    
+    comp_1_projection_densities_SD = pdf_from_quantiles_arr(comp_1_projection_quantiles_SD, alphas, x_grid=x_grid, samples = comp_1_projection_samples_SD)[1]
+    secondary_peak_locs_comp_1_SD = get_empirical_peaks_all(x_grid, comp_1_projection_densities_SD, comp_1_projection_samples_SD)[1]
+    # if not os.path.exists(f'../data/peaks/logpca_comp1_sp_loc_SD_n-{n_samples}_{index}.npy'):
+        # comp_1_projection_samples_SD = draw_samples_from_quantiles_arr(comp_1_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps, 
+        #                                                                 filedir = f'../data/samples/logpca_comp1_geodesic_projection_samples_SD_negative_xgrid_n-{n_samples}_{index}.npy')
+        # comp_1_projection_densities_SD = pdf_from_quantiles_arr(comp_1_projection_quantiles_SD, alphas, x_grid=x_grid, samples = comp_1_projection_samples_SD,
+        #                                                         filedir = f'../data/densities/logpca_comp1_geodesic_projection_densities_SD_negative_xgrid_n-{n_samples}_{index}.npy')[1]
+        # secondary_peak_locs_comp_1_SD = get_empirical_peaks_all(x_grid, comp_1_projection_densities_SD, comp_1_projection_samples_SD)[1]
+        # np.save(f'../data/peaks/logpca_comp1_sp_loc_SD_n-{n_samples}_{index}.npy', secondary_peak_locs_comp_1_SD)
+    # else:
+        # comp_1_projection_samples_SD = draw_samples_from_quantiles_arr(comp_1_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps, 
+        #                                                                filedir = f'../data/samples/logpca_comp1_geodesic_projection_samples_SD_negative_xgrid_n-{n_samples}_{index}.npy')
+        # comp_1_projection_densities_SD = pdf_from_quantiles_arr(comp_1_projection_quantiles_SD, alphas, x_grid=x_grid, samples = comp_1_projection_samples_SD,
+        #                                                         filedir = f'../data/densities/logpca_comp1_geodesic_projection_densities_SD_negative_xgrid_n-{n_samples}_{index}.npy')[1]
+        # secondary_peak_locs_comp_1_SD = np.load(f'../data/peaks/logpca_comp1_sp_loc_SD_n-{n_samples}_{index}.npy')
     
     comp_1_correctly_has_sp = (~np.isnan(emp_secondary_peak_locs_SD))*(~np.isnan(secondary_peak_locs_comp_1_SD))
     comp_1_proportion_correct = np.sum(comp_1_correctly_has_sp) / len(comp_1_correctly_has_sp)
@@ -39,19 +56,23 @@ def get_metrics(repeat, n_samples, alphas, eps, x_grid, x1_ind, comp_1_projectio
     comp_1_SD_proportion_correct = comp_1_proportion_correct
 
     ## Comp 2 SD ##
-    if not os.path.exists(f'../data/peaks/logpca_comp2_sp_loc_SD_n-{n_samples}_{repeat}.npy'):
-        comp_2_projection_samples_SD = draw_samples_from_quantiles_arr(comp_2_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps, 
-                                                                       filedir = f'../data/samples/logpca_comp2_geodesic_projection_samples_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')
-        comp_2_projection_densities_SD = pdf_from_quantiles_arr(comp_2_projection_quantiles_SD, alphas, x_grid=x_grid, samples = comp_2_projection_samples_SD,
-                                                                filedir = f'../data/densities/logpca_comp2_geodesic_projection_densities_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')[1]
-        secondary_peak_locs_comp_2_SD = get_empirical_peaks_all(x_grid, comp_2_projection_densities_SD, comp_2_projection_samples_SD)[1]
-        np.save(f'../data/peaks/logpca_comp2_sp_loc_SD_n-{n_samples}_{repeat}.npy', secondary_peak_locs_comp_2_SD)
-    else:
-        comp_2_projection_samples_SD = draw_samples_from_quantiles_arr(comp_2_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps, 
-                                                                       filedir = f'../data/samples/logpca_comp2_geodesic_projection_samples_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')
-        comp_2_projection_densities_SD = pdf_from_quantiles_arr(comp_2_projection_quantiles_SD, alphas, x_grid=x_grid, samples = comp_2_projection_samples_SD,
-                                                                filedir = f'../data/densities/logpca_comp2_geodesic_projection_densities_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')[1]
-        secondary_peak_locs_comp_2_SD = np.load(f'../data/peaks/logpca_comp2_sp_loc_SD_n-{n_samples}_{repeat}.npy')
+    comp_2_projection_samples_SD = draw_samples_from_quantiles_arr(comp_2_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps)
+                                                                    
+    comp_2_projection_densities_SD = pdf_from_quantiles_arr(comp_2_projection_quantiles_SD, alphas, x_grid=x_grid, samples = comp_2_projection_samples_SD)[1]
+    secondary_peak_locs_comp_2_SD = get_empirical_peaks_all(x_grid, comp_2_projection_densities_SD, comp_2_projection_samples_SD)[1]
+    # if not os.path.exists(f'../data/peaks/logpca_comp2_sp_loc_SD_n-{n_samples}_{index}.npy'):
+        # comp_2_projection_samples_SD = draw_samples_from_quantiles_arr(comp_2_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps, 
+        #                                                                 filedir = f'../data/samples/logpca_comp2_geodesic_projection_samples_SD_negative_xgrid_n-{n_samples}_{index}.npy')
+        # comp_2_projection_densities_SD = pdf_from_quantiles_arr(comp_2_projection_quantiles_SD, alphas, x_grid=x_grid, samples = comp_2_projection_samples_SD,
+        #                                                         filedir = f'../data/densities/logpca_comp2_geodesic_projection_densities_SD_negative_xgrid_n-{n_samples}_{index}.npy')[1]
+        # secondary_peak_locs_comp_2_SD = get_empirical_peaks_all(x_grid, comp_2_projection_densities_SD, comp_2_projection_samples_SD)[1]
+        # np.save(f'../data/peaks/logpca_comp2_sp_loc_SD_n-{n_samples}_{index}.npy', secondary_peak_locs_comp_2_SD)
+    # else:
+        # comp_2_projection_samples_SD = draw_samples_from_quantiles_arr(comp_2_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps, 
+        #                                                                filedir = f'../data/samples/logpca_comp2_geodesic_projection_samples_SD_negative_xgrid_n-{n_samples}_{index}.npy')
+        # comp_2_projection_densities_SD = pdf_from_quantiles_arr(comp_2_projection_quantiles_SD, alphas, x_grid=x_grid, samples = comp_2_projection_samples_SD,
+        #                                                         filedir = f'../data/densities/logpca_comp2_geodesic_projection_densities_SD_negative_xgrid_n-{n_samples}_{index}.npy')[1]
+        # secondary_peak_locs_comp_2_SD = np.load(f'../data/peaks/logpca_comp2_sp_loc_SD_n-{n_samples}_{index}.npy')
 
     comp_2_correctly_has_sp = (~np.isnan(emp_secondary_peak_locs_SD))*(~np.isnan(secondary_peak_locs_comp_2_SD))
     comp_2_proportion_correct = np.sum(comp_2_correctly_has_sp) / len(comp_2_correctly_has_sp)
@@ -62,19 +83,22 @@ def get_metrics(repeat, n_samples, alphas, eps, x_grid, x1_ind, comp_1_projectio
     comp_2_SD_proportion_correct = comp_2_proportion_correct
 
     ## Both Comps SD ##
-    if not os.path.exists(f'../data/peaks/logpca_both_sp_loc_SD_n-{n_samples}_{repeat}.npy'):
-        both_projection_samples_SD = draw_samples_from_quantiles_arr(both_components_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps, 
-                                                                     filedir = f'../data/samples/logpca_both_geodesic_projection_samples_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')
-        both_projection_densities_SD = pdf_from_quantiles_arr(both_components_projection_quantiles_SD, alphas, x_grid=x_grid, samples = both_projection_samples_SD,
-                                                              filedir = f'../data/densities/logpca_both_geodesic_projection_densities_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')[1]
-        secondary_peak_locs_both_SD = get_empirical_peaks_all(x_grid, both_projection_densities_SD, both_projection_samples_SD)[1]
-        np.save(f'../data/peaks/logpca_both_sp_loc_SD_n-{n_samples}_{repeat}.npy', secondary_peak_locs_both_SD)
-    else:
-        both_projection_samples_SD = draw_samples_from_quantiles_arr(both_components_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps, 
-                                                                     filedir = f'../data/samples/logpca_both_geodesic_projection_samples_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')
-        both_projection_densities_SD = pdf_from_quantiles_arr(both_components_projection_quantiles_SD, alphas, x_grid=x_grid, samples = both_projection_samples_SD,
-                                                              filedir = f'../data/densities/logpca_both_geodesic_projection_densities_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')[1]
-        secondary_peak_locs_both_SD = np.load(f'../data/peaks/logpca_both_sp_loc_SD_n-{n_samples}_{repeat}.npy')
+    both_projection_samples_SD = draw_samples_from_quantiles_arr(both_components_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps)                                                            
+    both_projection_densities_SD = pdf_from_quantiles_arr(both_components_projection_quantiles_SD, alphas, x_grid=x_grid, samples = both_projection_samples_SD)[1]
+    secondary_peak_locs_both_SD = get_empirical_peaks_all(x_grid, both_projection_densities_SD, both_projection_samples_SD)[1]
+    # if not os.path.exists(f'../data/peaks/logpca_both_sp_loc_SD_n-{n_samples}_{index}.npy'):
+        # both_projection_samples_SD = draw_samples_from_quantiles_arr(both_components_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps, 
+        #                                                                 filedir = f'../data/samples/logpca_both_geodesic_projection_samples_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')
+        # both_projection_densities_SD = pdf_from_quantiles_arr(both_components_projection_quantiles_SD, alphas, x_grid=x_grid, samples = both_projection_samples_SD,
+        #                                                         filedir = f'../data/densities/logpca_both_geodesic_projection_densities_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')[1]
+        # secondary_peak_locs_both_SD = get_empirical_peaks_all(x_grid, both_projection_densities_SD, both_projection_samples_SD)[1]
+        # np.save(f'../data/peaks/logpca_both_sp_loc_SD_n-{n_samples}_{index}.npy', secondary_peak_locs_both_SD)
+    # else:
+        # both_projection_samples_SD = draw_samples_from_quantiles_arr(both_components_projection_quantiles_SD, alphas, n_samples=n_samples, eps=eps, 
+        #                                                              filedir = f'../data/samples/logpca_both_geodesic_projection_samples_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')
+        # both_projection_densities_SD = pdf_from_quantiles_arr(both_components_projection_quantiles_SD, alphas, x_grid=x_grid, samples = both_projection_samples_SD,
+        #                                                       filedir = f'../data/densities/logpca_both_geodesic_projection_densities_SD_negative_xgrid_n-{n_samples}_{repeat}.npy')[1]
+        # secondary_peak_locs_both_SD = np.load(f'../data/peaks/logpca_both_sp_loc_SD_n-{n_samples}_{index}.npy')
 
     both_correctly_has_sp = (~np.isnan(emp_secondary_peak_locs_SD))*(~np.isnan(secondary_peak_locs_both_SD))
     both_proportion_correct = np.sum(both_correctly_has_sp) / len(both_correctly_has_sp)
@@ -90,12 +114,12 @@ def get_metrics(repeat, n_samples, alphas, eps, x_grid, x1_ind, comp_1_projectio
 
 if __name__ == "__main__":
 
-    x_grid = np.linspace(-1.0, 6.5, 2500)
+    x_grid = np.linspace(-1.0, 6.5, 1000)
     x1_ind = np.where(x_grid >= 1.0)[0][0]
     dx = x_grid[1] - x_grid[0]
 
     _, rRTs_2 = dp.get_standard_individual_rRT_data()
-    emp_kdes_SD = np.array([gaussian_kde(rRTs)(x_grid) for rRTs in rRTs_2])
+    emp_kdes_SD = np.array([FFTKDE(bw='silverman').fit(rRTs).evaluate(x_grid) for rRTs in rRTs_2])
     emp_secondary_peak_locs_SD = get_empirical_peaks_all(x_grid, emp_kdes_SD, rRTs_2)[1]
 
     emp_left_tail_mass_SD = np.array([np.trapz(kde[:x1_ind], x_grid[:x1_ind]) for kde in emp_kdes_SD])
@@ -105,27 +129,18 @@ if __name__ == "__main__":
     M = 200
     alphas = np.linspace(eps, 1 - eps, M)
 
-    log_Qbar_SD = np.load(f'../data/logpca_frechet_mean_SD_{max_K}-dims.npy')
-    components_SD = np.load(f'../data/logpca_components_SD_{max_K}-dims.npy')
-    beta_SD = np.load(f'../data/logpca_coords_SD_{max_K}-dims.npy')
-    explained_variance_SD = np.load(f'../data/logpca_explained_variance_SD_{max_K}-dims.npy')
-
-    comp_1_projection_quantiles_SD = geodesic_quantiles_from_component(log_Qbar_SD, components_SD[0], t_vals=beta_SD[:, 0])[1]
-    comp_2_projection_quantiles_SD = geodesic_quantiles_from_component(log_Qbar_SD, components_SD[1], t_vals=beta_SD[:, 1])[1]
-    both_components_projection_quantiles_SD = reconstruct_quantiles(log_Qbar_SD, components_SD[:2], beta_SD[:, :2])
-
     n_samples = 1000
-    n_repeats = 100
-    ncpus = 20
+    n_repeats = 1000
+    # ncpus = 20
     mets_func = partial(get_metrics, emp_secondary_peak_locs_SD = emp_secondary_peak_locs_SD, 
                         emp_left_tail_mass_SD = emp_left_tail_mass_SD,
-                        x_grid = x_grid, alphas = alphas, eps = eps, n_samples = n_samples, x1_ind = x1_ind,
-                        comp_1_projection_quantiles_SD = comp_1_projection_quantiles_SD,
-                        comp_2_projection_quantiles_SD = comp_2_projection_quantiles_SD,
-                        both_components_projection_quantiles_SD = both_components_projection_quantiles_SD)
+                        x_grid = x_grid, alphas = alphas, eps = eps, n_samples = n_samples, x1_ind = x1_ind)
+    output = []
+    for repeat in tqdm(range(n_repeats)):
+        output.append(mets_func(repeat))
 
-    with mproc.Pool(processes = ncpus) as pool:
-        output = pool.map(mets_func, np.arange(n_repeats))
+    # with mproc.Pool(processes = ncpus) as pool:
+    #     output = pool.map(mets_func, np.arange(n_repeats))
 
     output = np.array(output)
 

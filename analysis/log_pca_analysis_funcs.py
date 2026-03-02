@@ -4,7 +4,39 @@ import os
 
 import numpy as np
 from scipy.stats import gaussian_kde
-import data_processing_funcs as dp
+import fastkde
+from KDEpy import FFTKDE
+from sklearn.decomposition import PCA
+from numba import njit, prange
+
+def log_pca_quantiles(Q, alpha, n_components=2):
+    """
+    Q: (N, M) array of quantiles Q_i(alpha_m)
+    alpha: (M,) grid in (0,1)
+    returns: Qbar (M,), components (K,M), scores (N,K), pca object
+    """
+    Q = np.asarray(Q)
+    alpha = np.asarray(alpha)
+
+    # barycenter in 1D-W2 quantile coords
+    Qbar = Q.mean(axis=0)
+
+    # centered "log maps"
+    W = Q - Qbar[None, :]
+
+    # L2([0,1]) inner product via quadrature weights
+    sqrtw = np.sqrt(alpha[1] - alpha[0])
+
+    # weighted PCA = PCA on W * sqrt(w); so vector inner products approximate L2 integrals
+    X = W * sqrtw
+    pca = PCA(n_components=n_components)
+    scores = pca.fit_transform(X)
+
+    # bring components back to quantile-function coordinates
+    comps_weighted = pca.components_              # (K, M) in weighted coords
+    components = comps_weighted / sqrtw # (K, M) in quantile coords
+
+    return Qbar, components, scores, pca
 
 def geodesic_quantiles_from_component(x, v_k, t_vals=None):
     """
@@ -46,39 +78,49 @@ def reconstruct_quantiles(Qbar, components, coords):
     
     return Q_recon
 
-def draw_samples_from_quantiles(Q, alphas, n_samples=20000, eps=1e-3):
+@njit(parallel=True)
+def draw_samples_from_quantiles(Q, alphas, n_samples=20000, eps=1e-3, seed = 0):
     """
     Q: (M,) array of quantiles
     alphas: (M,) array of quantile levels in (0,1)
     returns: (n_samples,) array of samples drawn from the distribution defined by Q
     """
-    Q = np.asarray(Q)
-    alphas = np.asarray(alphas)
+    # Q = np.asarray(Q)
+    # alphas = np.asarray(alphas)
 
     # sample U in (eps, 1-eps) to avoid tail craziness
-    u = np.random.uniform(eps, 1 - eps, size=n_samples)
+    if seed == 0:
+        u = np.random.uniform(eps, 1 - eps, size=n_samples)
+    else:
+        rng = np.random.default_rng(seed=seed)
+        u = rng.uniform(eps, 1 - eps, size=n_samples)
     # import pdb; pdb.set_trace()
     samples = np.interp(u, alphas, Q)
 
     return samples
 
+@njit(parallel=True)
 def draw_samples_from_quantiles_arr(Q_arr, alphas, n_samples=20000, eps=1e-3, filedir = None):
     """
     Q_arr: (N, M) array of quantiles
     alphas: (M,) array of quantile levels in (0,1)
     returns: (N, n_samples) array of samples drawn from the distributions defined by each row of Q_arr
     """
-    Q_arr = np.asarray(Q_arr)
-    alphas = np.asarray(alphas)
-
-    N, M = Q_arr.shape
+    # Q_arr = np.asarray(Q_arr)
+    # alphas = np.asarray(alphas)
+    # import pdb; pdb.set_trace()
+    N = Q_arr.shape[0]
     samples_arr = np.empty((N, n_samples))
-    if filedir is None or not os.path.exists(filedir):
-        samples_arr = np.array([draw_samples_from_quantiles(Q_arr[i], alphas, n_samples=n_samples, eps=eps) for i in range(N)])
-        if filedir is not None:
-            np.save(filedir, samples_arr)
-    else:
-        samples_arr = np.load(filedir)
+    rng = np.random.default_rng(seed=123765)
+    seeds = rng.integers(0, 2**32, size=N)
+    # if filedir is None or not os.path.exists(filedir):
+        # samples_arr = np.array([draw_samples_from_quantiles(Q_arr[i], alphas, n_samples=n_samples, eps=eps) for i in range(N)])
+    for i in prange(N):
+        samples_arr[i] = draw_samples_from_quantiles(Q_arr[i], alphas, n_samples=n_samples, eps=eps, seed=seeds[i])
+        # if filedir is not None:
+            # np.save(filedir, samples_arr)
+    # else:
+        # samples_arr = np.load(filedir)
     
     return samples_arr
 
@@ -97,8 +139,10 @@ def pdf_from_quantiles_kde(Q, alphas, x_grid=None, samples = 20000, eps=1e-3):
         lo, hi = np.quantile(samples, [0.001, 0.999])
         x_grid = np.linspace(lo, hi, 400)
 
-    kde = gaussian_kde(samples)
-    return x_grid, kde(x_grid)
+    # kde = gaussian_kde(samples)
+    # pdf = fastkde.pdf_at_points(samples, list_of_points = x_grid)
+    pdf = FFTKDE(bw='silverman').fit(samples).evaluate(x_grid)
+    return x_grid, pdf # kde(x_grid) 
 
 def pdf_from_quantiles_arr(Q_arr, alphas, x_grid=None, samples=20000, eps=1e-3, filedir = None):
     """
@@ -149,15 +193,16 @@ def compute_quantiles_from_samples(samples_list, M=200, eps=1e-3, method="linear
 
 #     return peak_locs, proportions
 
+# @njit(parallel=True)
 def estimate_empirical_peaks(pdf, data, x):
 
     bounds = []
     peaks = []
 
     # only include edges as bounds if they are not local maxima; otherwise, exclude from consideration
-    if pdf[0] < pdf[1]:
+    if pdf[0] <= pdf[1]:
         bounds.append(np.array([x[0]]))
-    if pdf[-1] < pdf[-2]:
+    if pdf[-1] <= pdf[-2]:
         bounds.append(np.array([x[-1]]))
     
     forward_diff = np.diff(pdf[:-1])
@@ -168,10 +213,12 @@ def estimate_empirical_peaks(pdf, data, x):
     bounds = np.sort(np.concatenate(bounds))
     peaks = np.sort(np.concatenate(peaks))
     bounds = np.array([bounds[:-1], bounds[1:]]).T
+    # import pdb; pdb.set_trace()
     proportions = np.array([np.sum((data > lb)*(data <= ub)) for lb, ub in bounds])/len(data)
 
     return peaks, proportions
 
+# @njit(parallel=True)
 def extract_prim_and_sec_peak(peak_locs, proportions, thresh = None):
 
     # initial guesses; primary peak contains the most observations, secondary peak is the lowest peak
@@ -195,6 +242,11 @@ def extract_prim_and_sec_peak(peak_locs, proportions, thresh = None):
             props = np.array([np.nan, np.max(proportions)])
         else: # if the peak is "low enough" (< thresh ~= 1.0; group-aggregate secondary peaks tend to be around 0.25 s^-1), call it the secondary peak
             proportions_order = np.argsort(proportions)
+            # try:
+            #     second_largest_peak_ind = proportions_order[-2]
+            # except IndexError:
+            #     import pdb; pdb.set_trace()
+            #     second_largest_peak_ind = proportions_order[-1]
             second_largest_peak_ind = proportions_order[-2]
             peaks = np.array([secondary_peak, peak_locs[second_largest_peak_ind]]) # define the primary peak as the peak with the second-most observations
             props = np.array([np.max(proportions), np.sort(proportions)[-2]]) # and the secondary peak as the peak with the most observations
@@ -205,6 +257,7 @@ def extract_prim_and_sec_peak(peak_locs, proportions, thresh = None):
     
     return peaks, props
 
+# @njit(parallel=True)
 def get_empirical_estimates(pdf, data, x, thresh = 1.0):
 
     peak_locs, proportions = estimate_empirical_peaks(pdf, data, x)
@@ -212,6 +265,7 @@ def get_empirical_estimates(pdf, data, x, thresh = 1.0):
 
     return peak_locs, proportions
 
+# @njit(parallel=True)
 def get_empirical_peaks_all(x, pdfs, samples):
 
     primary_peak_locs = np.empty(len(pdfs))*np.nan
@@ -220,8 +274,7 @@ def get_empirical_peaks_all(x, pdfs, samples):
     secondary_peak_proportions = np.empty(len(pdfs))*np.nan
 
     for i, (pdf, rRTs) in enumerate(zip(pdfs, samples)):
-       
-        pdf = gaussian_kde(rRTs).evaluate(x)
+
         peak_locs, proportions = get_empirical_estimates(pdf, rRTs, x, thresh = 1.0)
 
         primary_peak_locs[i] = peak_locs[1]
