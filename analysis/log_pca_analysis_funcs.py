@@ -3,11 +3,11 @@ sys.path.extend(['../data'])
 import os
 
 import numpy as np
-from scipy.stats import gaussian_kde
-import fastkde
 from KDEpy import FFTKDE
 from sklearn.decomposition import PCA
 from numba import njit, prange
+
+from scipy.interpolate import PchipInterpolator
 
 def log_pca_quantiles(Q, alpha, n_components=2):
     """
@@ -79,7 +79,7 @@ def reconstruct_quantiles(Qbar, components, coords):
     return Q_recon
 
 @njit(parallel=True)
-def draw_samples_from_quantiles(Q, alphas, n_samples=20000, eps=1e-3, seed = 0):
+def draw_samples_from_quantiles(Q, alphas, n_samples=20000, eps=1e-3, rng = None):
     """
     Q: (M,) array of quantiles
     alphas: (M,) array of quantile levels in (0,1)
@@ -89,10 +89,9 @@ def draw_samples_from_quantiles(Q, alphas, n_samples=20000, eps=1e-3, seed = 0):
     # alphas = np.asarray(alphas)
 
     # sample U in (eps, 1-eps) to avoid tail craziness
-    if seed == 0:
+    if rng is None:
         u = np.random.uniform(eps, 1 - eps, size=n_samples)
     else:
-        rng = np.random.default_rng(seed=seed)
         u = rng.uniform(eps, 1 - eps, size=n_samples)
     # import pdb; pdb.set_trace()
     samples = np.interp(u, alphas, Q)
@@ -100,7 +99,7 @@ def draw_samples_from_quantiles(Q, alphas, n_samples=20000, eps=1e-3, seed = 0):
     return samples
 
 @njit(parallel=True)
-def draw_samples_from_quantiles_arr(Q_arr, alphas, n_samples=20000, eps=1e-3, filedir = None):
+def draw_samples_from_quantiles_arr(Q_arr, alphas, n_samples=20000, eps=1e-3, rngs = None):
     """
     Q_arr: (N, M) array of quantiles
     alphas: (M,) array of quantile levels in (0,1)
@@ -111,12 +110,10 @@ def draw_samples_from_quantiles_arr(Q_arr, alphas, n_samples=20000, eps=1e-3, fi
     # import pdb; pdb.set_trace()
     N = Q_arr.shape[0]
     samples_arr = np.empty((N, n_samples))
-    rng = np.random.default_rng(seed=123765)
-    seeds = rng.integers(0, 2**32, size=N)
     # if filedir is None or not os.path.exists(filedir):
         # samples_arr = np.array([draw_samples_from_quantiles(Q_arr[i], alphas, n_samples=n_samples, eps=eps) for i in range(N)])
     for i in prange(N):
-        samples_arr[i] = draw_samples_from_quantiles(Q_arr[i], alphas, n_samples=n_samples, eps=eps, seed=seeds[i])
+        samples_arr[i] = draw_samples_from_quantiles(Q_arr[i], alphas, n_samples=n_samples, eps=eps, rng = rngs[i])
         # if filedir is not None:
             # np.save(filedir, samples_arr)
     # else:
@@ -132,8 +129,8 @@ def pdf_from_quantiles_kde(Q, alphas, x_grid=None, samples = 20000, eps=1e-3):
     returns: (L,) array of densities on x_grid
     """
 
-    if isinstance(samples, int):
-        samples = draw_samples_from_quantiles(Q, alphas, n_samples=samples, eps=eps)
+    # if isinstance(samples, int):
+    #     samples = draw_samples_from_quantiles(Q, alphas, n_samples=samples, eps=eps)
 
     if x_grid is None:
         lo, hi = np.quantile(samples, [0.001, 0.999])
@@ -141,7 +138,9 @@ def pdf_from_quantiles_kde(Q, alphas, x_grid=None, samples = 20000, eps=1e-3):
 
     # kde = gaussian_kde(samples)
     # pdf = fastkde.pdf_at_points(samples, list_of_points = x_grid)
-    pdf = FFTKDE(bw='silverman').fit(samples).evaluate(x_grid)
+    al_int = np.linspace(alphas[0], alphas[-1], 10000)
+    Q_int = PchipInterpolator(alphas, Q).__call__(al_int)
+    pdf = FFTKDE(bw='silverman').fit(Q_int).evaluate(x_grid)
     return x_grid, pdf # kde(x_grid) 
 
 def pdf_from_quantiles_arr(Q_arr, alphas, x_grid=None, samples=20000, eps=1e-3, filedir = None):
@@ -161,6 +160,7 @@ def pdf_from_quantiles_arr(Q_arr, alphas, x_grid=None, samples=20000, eps=1e-3, 
         densities = np.load(filedir)
 
     return x_grid, densities
+
 def compute_quantiles_from_samples(samples_list, M=200, eps=1e-3, method="linear"):
     """
     samples_list: list of 1D arrays, length N
@@ -194,7 +194,7 @@ def compute_quantiles_from_samples(samples_list, M=200, eps=1e-3, method="linear
 #     return peak_locs, proportions
 
 # @njit(parallel=True)
-def estimate_empirical_peaks(pdf, data, x):
+def estimate_empirical_peaks(pdf, x, data = None):
 
     bounds = []
     peaks = []
@@ -207,14 +207,32 @@ def estimate_empirical_peaks(pdf, data, x):
     
     forward_diff = np.diff(pdf[:-1])
     backward_diff = -np.diff(pdf[1:])
-
-    bounds.append(x[np.nonzero((forward_diff < 0)*(backward_diff < 0))[0] + 1])  # inner bounds are local minima between peaks
+    if np.nonzero((forward_diff < 0)*(backward_diff < 0))[0].size > 0:
+        bounds.append(x[np.nonzero((forward_diff < 0)*(backward_diff < 0))[0] + 1]) # inner bounds are local minima between peaks
     peaks.append(x[np.nonzero((forward_diff > 0)*(backward_diff > 0))[0] + 1])
+      
+    # bounds can be missed because of plateau regions in pdf; if so, find plateau regions and set bounds at their midpoints
+    if not len(np.concatenate(bounds)) == len(np.concatenate(peaks)) + 1:
+        peaks_ = np.sort(np.concatenate(peaks))
+        neighbouring_peak_pairs = np.array([peaks_[:-1], peaks_[1:]]).T
+
+        for pair in neighbouring_peak_pairs:
+
+            plateau_inds = np.nonzero((x[1:-1] > pair[0])*(x[1:-1] < pair[1])*(forward_diff <= 0)*(backward_diff <= 0))[0] + 1
+            midpoint = plateau_inds[len(plateau_inds) // 2]
+            if x[midpoint] in np.concatenate(bounds):
+                continue
+            bounds.append(np.array([x[midpoint]]))
+
     bounds = np.sort(np.concatenate(bounds))
     peaks = np.sort(np.concatenate(peaks))
-    bounds = np.array([bounds[:-1], bounds[1:]]).T
-    # import pdb; pdb.set_trace()
-    proportions = np.array([np.sum((data > lb)*(data <= ub)) for lb, ub in bounds])/len(data)
+    bounds = np.array([bounds[:-1], bounds[1:]]).T 
+    if not data is None:   
+        proportions = np.array([np.sum((data > lb)*(data <= ub)) for lb, ub in bounds])/len(data)
+    else:
+        # import pdb; pdb.set_trace()
+        bound_inds = np.array([np.searchsorted(x, bounds[:, 0]), np.searchsorted(x, bounds[:, 1])])
+        proportions = np.array([np.trapz(pdf[b1:b2], x[b1:b2]) for b1, b2 in bound_inds.T])
 
     return peaks, proportions
 
@@ -242,11 +260,11 @@ def extract_prim_and_sec_peak(peak_locs, proportions, thresh = None):
             props = np.array([np.nan, np.max(proportions)])
         else: # if the peak is "low enough" (< thresh ~= 1.0; group-aggregate secondary peaks tend to be around 0.25 s^-1), call it the secondary peak
             proportions_order = np.argsort(proportions)
-            # try:
-            #     second_largest_peak_ind = proportions_order[-2]
-            # except IndexError:
-            #     import pdb; pdb.set_trace()
-            #     second_largest_peak_ind = proportions_order[-1]
+            try:
+                second_largest_peak_ind = proportions_order[-2]
+            except IndexError:
+                import pdb; pdb.set_trace()
+                second_largest_peak_ind = proportions_order[-1]
             second_largest_peak_ind = proportions_order[-2]
             peaks = np.array([secondary_peak, peak_locs[second_largest_peak_ind]]) # define the primary peak as the peak with the second-most observations
             props = np.array([np.max(proportions), np.sort(proportions)[-2]]) # and the secondary peak as the peak with the most observations
@@ -258,29 +276,37 @@ def extract_prim_and_sec_peak(peak_locs, proportions, thresh = None):
     return peaks, props
 
 # @njit(parallel=True)
-def get_empirical_estimates(pdf, data, x, thresh = 1.0):
+def get_empirical_estimates(pdf, x, data = None, thresh = 1.0):
 
-    peak_locs, proportions = estimate_empirical_peaks(pdf, data, x)
+    peak_locs, proportions = estimate_empirical_peaks(pdf, x, data)
     peak_locs, proportions = extract_prim_and_sec_peak(peak_locs, proportions, thresh = thresh)
 
     return peak_locs, proportions
 
 # @njit(parallel=True)
-def get_empirical_peaks_all(x, pdfs, samples):
+def get_empirical_peaks_all(x, pdfs, samples = None):
 
     primary_peak_locs = np.empty(len(pdfs))*np.nan
     secondary_peak_locs = np.empty(len(pdfs))*np.nan
     primary_peak_proportions = np.empty(len(pdfs))*np.nan
     secondary_peak_proportions = np.empty(len(pdfs))*np.nan
+    if not samples is None:
+        for i, (pdf, rRTs) in enumerate(zip(pdfs, samples)):
 
-    for i, (pdf, rRTs) in enumerate(zip(pdfs, samples)):
+            peak_locs, proportions = get_empirical_estimates(pdf, x, rRTs, thresh = 1.0)
 
-        peak_locs, proportions = get_empirical_estimates(pdf, rRTs, x, thresh = 1.0)
+            primary_peak_locs[i] = peak_locs[1]
+            secondary_peak_locs[i] = peak_locs[0]
+            primary_peak_proportions[i] = proportions[1]
+            secondary_peak_proportions[i] = proportions[0]
+    else:
+        for i, pdf in enumerate(pdfs):
 
-        primary_peak_locs[i] = peak_locs[1]
-        secondary_peak_locs[i] = peak_locs[0]
-        primary_peak_proportions[i] = proportions[1]
-        secondary_peak_proportions[i] = proportions[0]
+            peak_locs, proportions = get_empirical_estimates(pdf, x, thresh = 1.0)
+
+            primary_peak_locs[i] = peak_locs[1]
+            secondary_peak_locs[i] = peak_locs[0]
+            primary_peak_proportions[i] = proportions[1]
+            secondary_peak_proportions[i] = proportions[0]
 
     return primary_peak_locs, secondary_peak_locs, primary_peak_proportions, secondary_peak_proportions
-
