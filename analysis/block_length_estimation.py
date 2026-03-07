@@ -30,11 +30,12 @@ def _digamma(x: float) -> float:
     inv2 = inv * inv
 
     # Asymptotic series: psi(x) = log(x) - 1/(2x) - 1/(12x^2) + 1/(120x^4) - 1/(252x^6) + ...
-    result += np.log(x) - 0.5 * inv - (1.0 / 12.0) * inv2
-    inv4 = inv2 * inv2
-    result += (1.0 / 120.0) * inv4
-    inv6 = inv4 * inv2
-    result -= (1.0 / 252.0) * inv6
+    result += np.log(x) - 0.5 * inv - inv**2/12.0 + inv**4/120.0 - inv**6/252.0 + inv**8/240.0
+    # result += np.log(x) - 0.5 * inv - (1.0 / 12.0) * inv2
+    # inv4 = inv2 * inv2
+    # result += (1.0 / 120.0) * inv4
+    # inv6 = inv4 * inv2
+    # result -= (1.0 / 252.0) * inv6
 
     return result
 
@@ -86,6 +87,8 @@ def ksg_mi_1d_1d(x: np.ndarray, y: np.ndarray, k: int = 5) -> float:
             if topk[t] > eps:
                 eps = topk[t]
 
+        eps = np.nextafter(eps, 0)
+
         if eps < 0.0:
             eps = 0.0
 
@@ -120,16 +123,16 @@ def ksg_mi_1d_1d(x: np.ndarray, y: np.ndarray, k: int = 5) -> float:
 def ksg_mi_with_jitter(x: np.ndarray, y: np.ndarray, k: int = 5, jitter: float = 0.0, seed: int = 0) -> float:
     """
     Wrapper that adds small Gaussian perturbations to break ties.
-    Jitter ~ 1e-10 * std(x).
+    Jitter ~ 1e-10 * mean(abs(x)).
     """
     x = np.asarray(x, dtype=np.float64)
     y = np.asarray(y, dtype=np.float64)
     if jitter > 0.0:
         rng = np.random.default_rng(seed)
-        sx = np.std(x)
-        sy = np.std(y)
-        x = x + rng.normal(0.0, jitter * (sx if sx > 0 else 1.0), size=x.shape[0])
-        y = y + rng.normal(0.0, jitter * (sy if sy > 0 else 1.0), size=y.shape[0])
+        sx = np.mean(np.abs(x))
+        sy = np.mean(np.abs(y))
+        x = x + rng.normal(0.0, jitter * np.max([sx, 1.0]), size=x.shape[0])
+        y = y + rng.normal(0.0, jitter * np.max([sy, 1.0]), size=y.shape[0])
     return float(ksg_mi_1d_1d(x, y, k))
 
 def individual_MI_values(sessions, n_permutations, n_lags, seed):
@@ -178,9 +181,7 @@ if __name__ == "__main__":
             for j in range(n_lags):
                 true_MIs[j, i, :] = true_MI_ind[j]
                 null_MIs[j, i, :, :] = null_MIs_ind[j]
-            # if i == 5:
-            #     import pdb; pdb.set_trace()
-            # print(f'individual {i} complete')
+
         np.save('../data/block_length_estimation_true_MIs.npy', true_MIs)
         np.save('../data/block_length_estimation_null_MIs.npy', null_MIs)
         np.save('../data/block_length_estimation_p_values.npy', p_values)
