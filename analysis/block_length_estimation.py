@@ -190,4 +190,5 @@ if __name__ == "__main__":
         null_MIs = np.load('../data/block_length_estimation_null_MIs.npy')
         p_values = np.load('../data/block_length_estimation_p_values.npy')
 
+    import pdb; pdb.set_trace()
     print(np.mean(np.mean(p_values, axis = 1), axis = 1))
